@@ -65,10 +65,17 @@ if ! command -v systemd-timesyncd &> /dev/null && ! dpkg -s systemd-timesyncd &>
     apt-get update -y && apt-get install -y systemd-timesyncd
 fi
 
-echo -e "${green}正在启用并启动 NTP 时间同步...${none}"
-timedatectl set-ntp true
-systemctl enable --now systemd-timesyncd
-systemctl restart systemd-timesyncd
+echo -e "${green}正在尝试启用并启动 NTP 时间同步...${none}"
+
+# 尝试通过 timedatectl 开启 NTP，如果报错则静默并输出黄字提示
+if ! timedatectl set-ntp true 2>/dev/null; then
+    echo -e "${yellow}提示: 当前环境不支持通过 timedatectl 强制开启 NTP (常见于 LXC/OpenVZ 容器)。${none}"
+    echo -e "${yellow}时间通常已由宿主机自动管理，此报错可安全忽略。${none}"
+fi
+
+# 尝试启动 timesyncd 服务（即使报错也不中断脚本）
+systemctl enable --now systemd-timesyncd 2>/dev/null || true
+systemctl restart systemd-timesyncd 2>/dev/null || true
 echo -e "${green}时区已成功设置为 UTC，并已开启系统时间同步。${none}"
 
 # ==========================================
