@@ -52,12 +52,23 @@ fi
 echo -e "${green}Swap 重新创建并启用成功。${none}"
 
 # ==========================================
-# 2. 设置时区为 UTC 并安装/开启系统时间同步
+# 2. 动态设置时区并安装/开启系统时间同步
 # ==========================================
 echo -e "${green}--- [2/3] 配置时区和 systemd-timesyncd ---${none}"
 
-echo -e "${green}正在将时区设置为 UTC...${none}"
-timedatectl set-timezone UTC
+echo -e "${green}正在检测服务器 IP 地理位置以决定时区...${none}"
+# 使用 ip-api.com 获取当前 IP 所在的时区 (纯文本格式返回，提取速度快)
+IP_TZ=$(curl -s --max-time 5 http://ip-api.com/line?fields=timezone || echo "UTC")
+
+if [[ "$IP_TZ" == Asia/* ]]; then
+    TARGET_TZ="Asia/Hong_Kong"
+    echo -e "${green}检测到服务器位于亚洲 (当前定位: $IP_TZ)，将时区设为 HKT (Asia/Hong_Kong)。${none}"
+else
+    TARGET_TZ="UTC"
+    echo -e "${green}服务器非亚洲区域 (当前定位: $IP_TZ) 或检测超时，默认将时区设为 UTC。${none}"
+fi
+
+timedatectl set-timezone "$TARGET_TZ"
 
 # 检查 systemd-timesyncd 是否安装，未安装则使用 apt 安装
 if ! command -v systemd-timesyncd &> /dev/null && ! dpkg -s systemd-timesyncd &> /dev/null; then
@@ -66,17 +77,16 @@ if ! command -v systemd-timesyncd &> /dev/null && ! dpkg -s systemd-timesyncd &>
 fi
 
 echo -e "${green}正在尝试启用并启动 NTP 时间同步...${none}"
-
-# 尝试通过 timedatectl 开启 NTP，如果报错则静默并输出黄字提示
+# 尝试通过 timedatectl 开启 NTP (容错处理：若是 LXC/OpenVZ 容器则静默忽略报错)
 if ! timedatectl set-ntp true 2>/dev/null; then
     echo -e "${yellow}提示: 当前环境不支持通过 timedatectl 强制开启 NTP (常见于 LXC/OpenVZ 容器)。${none}"
-    echo -e "${yellow}时间通常已由宿主机自动管理，此报错可安全忽略。${none}"
+    echo -e "${yellow}时间通常已由宿主机自动管理，此提示可安全忽略。${none}"
 fi
 
-# 尝试启动 timesyncd 服务（即使报错也不中断脚本）
+# 尝试启动 timesyncd 服务
 systemctl enable --now systemd-timesyncd 2>/dev/null || true
 systemctl restart systemd-timesyncd 2>/dev/null || true
-echo -e "${green}时区已成功设置为 UTC，并已开启系统时间同步。${none}"
+echo -e "${green}时区已成功设置为 $TARGET_TZ，并已完成系统时间同步配置。${none}"
 
 # ==========================================
 # 3. 优化 DNS 配置
@@ -133,7 +143,6 @@ if command -v systemctl &> /dev/null && systemctl is-active --quiet systemd-reso
          echo -e "${green}systemd-resolved 配置已更新并重启。${none}"
     fi
 elif command -v nmcli &> /dev/null; then
-    # 如果使用 NetworkManager，它也可能管理 DNS
     echo -e "${yellow}检测到 NetworkManager，可能会影响 /etc/resolv.conf 的持久性。${none}"
     echo -e "${yellow}您可能需要通过 NetworkManager 配置 DNS 或禁用其 DNS 管理功能。${none}"
 else
