@@ -1,17 +1,5 @@
 #!/usr/bin/env bash
 
-# ============================================================
-# Sing-box SS2022 + SOCKS5 一键部署 / 节点替换脚本
-# 兼容：Debian 11+ / Ubuntu 20.04+
-#
-# 特点：
-#   1. 单进程同时提供 SS2022 + SOCKS5 入站
-#   2. 优先安装 sing-box 1.13.x
-#   3. 如果 1.13.x 获取失败，自动 fallback 到 latest 稳定版
-#   4. 已有 config.json 时，只替换节点相关入站，不动其它配置
-#   5. SS 链接输出推荐格式 + legacy 兼容格式
-# ============================================================
-
 set -o pipefail
 
 green="\033[32m"
@@ -852,33 +840,6 @@ print_result() {
     echo -e "用户名: ${green}${SOCKS_USER}${none}"
     echo -e "密码: ${green}${SOCKS_PASS}${none}"
     echo -e "链接: ${green}${SOCKS_URI}${none}"
-    echo ""
-
-    echo -e "${yellow}[配置替换说明]${none}"
-    if [[ "$OLD_CONFIG_FOUND" == "true" ]]; then
-        echo -e "检测到旧配置: ${green}是${none}"
-        echo -e "旧配置备份: ${green}${BACKUP_FILE:-已备份}${none}"
-        echo -e "替换范围: ${green}仅替换 shadowsocks / socks 节点入站，其它配置尽量保留${none}"
-    else
-        echo -e "检测到旧配置: ${green}否，新建标准配置${none}"
-    fi
-    echo ""
-
-    echo -e "${yellow}[常用命令]${none}"
-    echo -e "查看状态: ${green}systemctl status sing-box${none}"
-    echo -e "查看日志: ${green}journalctl -u sing-box -f${none}"
-    echo -e "重启服务: ${green}systemctl restart sing-box${none}"
-    echo -e "停止服务: ${green}systemctl stop sing-box${none}"
-    echo -e "配置文件: ${green}${SING_BOX_CONFIG}${none}"
-    echo ""
-
-    echo -e "${yellow}[注意事项]${none}"
-    echo -e "1. 如果无法连接，请检查云厂商安全组是否放行："
-    echo -e "   SS2022: ${green}TCP/UDP ${SS_PORT}${none}"
-    echo -e "   SOCKS5: ${green}TCP ${SOCKS_PORT}${none}"
-    echo -e "2. SOCKS5 是明文代理，即使有用户名密码，也不建议在不可信网络长期使用。"
-    echo -e "3. x-ui 或部分旧客户端如果无法解析推荐链接，请尝试兼容链接，或手动填写节点信息。"
-    echo -e "4. 推荐 SS2022 使用推荐链接；兼容链接主要给旧解析器兜底。"
 
     echo -e "\n${green}=========================================${none}"
 }
