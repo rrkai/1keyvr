@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 
 # ============================================================
-# Sing-box SS2022 + SOCKS5 一键部署脚本
+# Sing-box SS2022 + SOCKS5 一键部署 / 节点替换脚本
 # 兼容：Debian 11+ / Ubuntu 20.04+
+#
 # 特点：
 #   1. 单进程同时提供 SS2022 + SOCKS5 入站
 #   2. 优先安装 sing-box 1.13.x
 #   3. 如果 1.13.x 获取失败，自动 fallback 到 latest 稳定版
-#   4. 低占用、少激进内核参数、小内存 VPS 友好
+#   4. 已有 config.json 时，只替换节点相关入站，不动其它配置
+#   5. SS 链接输出推荐格式 + legacy 兼容格式
 # ============================================================
 
 set -o pipefail
@@ -149,13 +151,12 @@ install_dependencies() {
 }
 
 # ============================================================
-# Swap
+# Swap：已有 swap 就不动
 # ============================================================
 
 setup_swap() {
-    info "--- [1/6] 配置 Swap ---"
+    info "--- [1/6] 检查 Swap ---"
 
-    # 已有任何 swap 时，不重复强行创建。避免破坏用户已有 swap 策略。
     if swapon --show | awk 'NR>1 {found=1} END {exit !found}'; then
         warn "检测到系统已有 Swap，跳过创建 ${SWAP_FILE}。"
         return 0
@@ -184,7 +185,7 @@ setup_swap() {
 }
 
 # ============================================================
-# 时区、NTP、DNS
+# 时区、NTP、DNS：保守处理
 # ============================================================
 
 setup_time_dns() {
@@ -204,9 +205,6 @@ setup_time_dns() {
     systemctl enable --now systemd-timesyncd 2>/dev/null || true
     systemctl restart systemd-timesyncd 2>/dev/null || true
 
-    # DNS 处理：
-    # Debian 11 / Ubuntu 20.04 都可能使用 systemd-resolved。
-    # 优先 drop-in，不直接破坏 /etc/resolv.conf。
     if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
         mkdir -p /etc/systemd/resolved.conf.d
 
@@ -224,8 +222,6 @@ EOF
             cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null || true
         fi
 
-        # 如果 /etc/resolv.conf 是 symlink，直接覆盖可能失败或影响系统网络管理。
-        # 这里先尝试普通写入，失败则跳过。
         if [[ ! -L /etc/resolv.conf ]]; then
             cat > /etc/resolv.conf << EOF
 nameserver 1.1.1.1
@@ -240,7 +236,7 @@ EOF
 }
 
 # ============================================================
-# 轻量 sysctl
+# 轻量 sysctl：只写保守参数
 # ============================================================
 
 setup_sysctl() {
@@ -343,7 +339,6 @@ get_sing_box_version() {
         return 0
     fi
 
-    # 再兜底一次：从全部 releases 里拿第一个非 prerelease / 非 draft
     if [[ -n "$RELEASES_JSON" ]] && echo "$RELEASES_JSON" | jq empty >/dev/null 2>&1; then
         TARGET_VERSION="$(
             echo "$RELEASES_JSON" \
@@ -411,13 +406,15 @@ install_sing_box() {
 }
 
 # ============================================================
-# 生成配置
+# 工具函数
 # ============================================================
 
 get_random_port() {
     local port
+
     while true; do
         port="$(shuf -i 10000-60000 -n 1)"
+
         if ! ss -tuln | awk '{print $5}' | grep -qE "[:.]${port}$"; then
             echo "$port"
             return 0
@@ -425,24 +422,140 @@ get_random_port() {
     done
 }
 
-generate_config() {
-    info "--- [5/6] 生成 SS2022 与 SOCKS5 配置 ---"
+base64_no_wrap() {
+    if base64 --help 2>&1 | grep -q -- '-w'; then
+        base64 -w 0
+    else
+        base64 | tr -d '\n'
+    fi
+}
 
-    SS_PORT="$(get_random_port)"
-    SOCKS_PORT="$(get_random_port)"
+urlencode() {
+    local string="$1"
+    local strlen=${#string}
+    local encoded=""
+    local pos c o
 
-    while [[ "$SOCKS_PORT" == "$SS_PORT" ]]; do
-        SOCKS_PORT="$(get_random_port)"
+    for (( pos=0; pos<strlen; pos++ )); do
+        c="${string:$pos:1}"
+        case "$c" in
+            [a-zA-Z0-9.~_-])
+                encoded+="$c"
+                ;;
+            *)
+                printf -v o '%%%02X' "'$c"
+                encoded+="$o"
+                ;;
+        esac
     done
 
-    # SS2022 aes-256-gcm 使用 32 字节密钥，base64 输出。
-    SS_PASS="$(openssl rand -base64 32)"
+    echo "$encoded"
+}
 
-    SOCKS_USER="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 10)"
-    SOCKS_PASS="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)"
+make_ss_uri() {
+    local method="$1"
+    local password="$2"
+    local server="$3"
+    local port="$4"
+    local name="$5"
 
-    mkdir -p "$SING_BOX_DIR"
+    local enc_method
+    local enc_password
+    local enc_name
 
+    enc_method="$(urlencode "$method")"
+    enc_password="$(urlencode "$password")"
+    enc_name="$(urlencode "$name")"
+
+    echo "ss://${enc_method}:${enc_password}@${server}:${port}#${enc_name}"
+}
+
+make_ss_legacy_uri() {
+    local method="$1"
+    local password="$2"
+    local server="$3"
+    local port="$4"
+    local name="$5"
+
+    local userinfo
+    local enc_name
+
+    userinfo="$(echo -n "${method}:${password}" | base64_no_wrap)"
+    enc_name="$(urlencode "$name")"
+
+    echo "ss://${userinfo}@${server}:${port}#${enc_name}"
+}
+
+make_socks_uri() {
+    local username="$1"
+    local password="$2"
+    local server="$3"
+    local port="$4"
+    local name="$5"
+
+    local enc_user
+    local enc_pass
+    local enc_name
+
+    enc_user="$(urlencode "$username")"
+    enc_pass="$(urlencode "$password")"
+    enc_name="$(urlencode "$name")"
+
+    echo "socks5://${enc_user}:${enc_pass}@${server}:${port}#${enc_name}"
+}
+
+# ============================================================
+# 老配置检测：只处理节点相关入站
+# ============================================================
+
+inspect_old_node_config() {
+    OLD_CONFIG_FOUND="false"
+    OLD_NODE_FOUND="false"
+    OLD_SS_PORT=""
+    OLD_SOCKS_PORT=""
+
+    if [[ ! -f "$SING_BOX_CONFIG" ]]; then
+        return 0
+    fi
+
+    OLD_CONFIG_FOUND="true"
+
+    if ! jq empty "$SING_BOX_CONFIG" >/dev/null 2>&1; then
+        warn "检测到旧配置文件，但 JSON 格式异常，将备份后重写完整配置。"
+        OLD_NODE_FOUND="unknown"
+        return 0
+    fi
+
+    OLD_SS_PORT="$(
+        jq -r '
+          (.inbounds // [])
+          | map(select((.type // "") == "shadowsocks" or (.tag // "") == "ss2022-in" or (.tag // "") == "ss-in"))
+          | .[0].listen_port // empty
+        ' "$SING_BOX_CONFIG"
+    )"
+
+    OLD_SOCKS_PORT="$(
+        jq -r '
+          (.inbounds // [])
+          | map(select((.type // "") == "socks" or (.tag // "") == "socks5-in" or (.tag // "") == "socks-in"))
+          | .[0].listen_port // empty
+        ' "$SING_BOX_CONFIG"
+    )"
+
+    if [[ -n "$OLD_SS_PORT" || -n "$OLD_SOCKS_PORT" ]]; then
+        OLD_NODE_FOUND="true"
+    fi
+}
+
+backup_old_config() {
+    if [[ -f "$SING_BOX_CONFIG" ]]; then
+        BACKUP_FILE="${SING_BOX_CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
+        cp "$SING_BOX_CONFIG" "$BACKUP_FILE"
+        warn "已备份旧配置到: ${BACKUP_FILE}"
+    fi
+}
+
+write_fresh_config() {
     cat > "$SING_BOX_CONFIG" << EOF
 {
   "log": {
@@ -481,14 +594,123 @@ generate_config() {
   ]
 }
 EOF
+}
+
+replace_node_in_existing_config() {
+    local tmp_config
+    tmp_config="$(mktemp)"
+
+    jq \
+      --argjson ss_port "$SS_PORT" \
+      --argjson socks_port "$SOCKS_PORT" \
+      --arg ss_pass "$SS_PASS" \
+      --arg socks_user "$SOCKS_USER" \
+      --arg socks_pass "$SOCKS_PASS" \
+      '
+      def is_old_node_inbound:
+        ((.tag // "") as $tag | ["ss2022-in","ss-in","socks5-in","socks-in"] | index($tag)) != null
+        or
+        ((.type // "") as $type | ["shadowsocks","socks"] | index($type)) != null;
+
+      .log = (.log // {"level":"warn","timestamp":true})
+      |
+      .inbounds = (
+        ((.inbounds // []) | map(select(is_old_node_inbound | not)))
+        +
+        [
+          {
+            "type": "shadowsocks",
+            "tag": "ss2022-in",
+            "listen": "::",
+            "listen_port": $ss_port,
+            "method": "2022-blake3-aes-256-gcm",
+            "password": $ss_pass,
+            "tcp_fast_open": true
+          },
+          {
+            "type": "socks",
+            "tag": "socks5-in",
+            "listen": "::",
+            "listen_port": $socks_port,
+            "users": [
+              {
+                "username": $socks_user,
+                "password": $socks_pass
+              }
+            ],
+            "tcp_fast_open": true
+          }
+        ]
+      )
+      |
+      .outbounds = (
+        if ((.outbounds // []) | type == "array" and length > 0)
+        then .outbounds
+        else [{"type":"direct","tag":"direct"}]
+        end
+      )
+      ' "$SING_BOX_CONFIG" > "$tmp_config"
+
+    if jq empty "$tmp_config" >/dev/null 2>&1; then
+        mv "$tmp_config" "$SING_BOX_CONFIG"
+    else
+        rm -f "$tmp_config"
+        die "错误: 生成新配置失败，已保留旧配置备份。"
+    fi
+}
+
+# ============================================================
+# 生成或替换节点配置
+# ============================================================
+
+generate_or_replace_node_config() {
+    info "--- [5/6] 生成 / 替换 SS2022 与 SOCKS5 节点配置 ---"
+
+    SS_PORT="$(get_random_port)"
+    SOCKS_PORT="$(get_random_port)"
+
+    while [[ "$SOCKS_PORT" == "$SS_PORT" ]]; do
+        SOCKS_PORT="$(get_random_port)"
+    done
+
+    SS_PASS="$(openssl rand -base64 32)"
+    SOCKS_USER="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 10)"
+    SOCKS_PASS="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)"
+
+    mkdir -p "$SING_BOX_DIR"
+
+    inspect_old_node_config
+
+    if [[ "$OLD_CONFIG_FOUND" == "true" ]]; then
+        backup_old_config
+
+        if jq empty "$SING_BOX_CONFIG" >/dev/null 2>&1; then
+            if [[ "$OLD_NODE_FOUND" == "true" ]]; then
+                warn "检测到旧节点配置，将只替换节点相关入站。"
+                [[ -n "$OLD_SS_PORT" ]] && warn "旧 SS 入站端口: ${OLD_SS_PORT}"
+                [[ -n "$OLD_SOCKS_PORT" ]] && warn "旧 SOCKS 入站端口: ${OLD_SOCKS_PORT}"
+            else
+                warn "检测到已有 sing-box 配置，但未发现旧 SS/SOCKS 节点，将追加新节点入站。"
+            fi
+
+            replace_node_in_existing_config
+        else
+            warn "旧配置 JSON 异常，已备份并重写为标准 SS2022 + SOCKS5 配置。"
+            write_fresh_config
+        fi
+    else
+        write_fresh_config
+    fi
 
     chmod 600 "$SING_BOX_CONFIG"
 
     if ! "$SING_BOX_BIN" check -c "$SING_BOX_CONFIG"; then
-        die "错误: Sing-box 配置校验失败。"
+        error "Sing-box 配置校验失败，最近生成的配置如下："
+        cat "$SING_BOX_CONFIG"
+        die "请检查配置。"
     fi
 
-    info "配置文件已生成并校验通过。"
+    info "节点配置已生成 / 替换并校验通过。"
 }
 
 # ============================================================
@@ -556,7 +778,6 @@ EOF
 # ============================================================
 
 setup_firewall() {
-    # ufw
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "active"; then
         ufw allow "${SS_PORT}/tcp" >/dev/null 2>&1 || true
         ufw allow "${SS_PORT}/udp" >/dev/null 2>&1 || true
@@ -564,7 +785,6 @@ setup_firewall() {
         warn "已尝试放行 ufw 端口。"
     fi
 
-    # firewalld
     if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
         firewall-cmd --permanent --add-port="${SS_PORT}/tcp" >/dev/null 2>&1 || true
         firewall-cmd --permanent --add-port="${SS_PORT}/udp" >/dev/null 2>&1 || true
@@ -575,7 +795,7 @@ setup_firewall() {
 }
 
 # ============================================================
-# 输出节点
+# 获取公网 IP
 # ============================================================
 
 get_server_ip() {
@@ -589,19 +809,19 @@ get_server_ip() {
     SERVER_IP="$(echo "$SERVER_IP" | tr -d '\r\n ')"
 }
 
-base64_no_wrap() {
-    if base64 --help 2>&1 | grep -q -- '-w'; then
-        base64 -w 0
-    else
-        base64 | tr -d '\n'
-    fi
-}
+# ============================================================
+# 输出结果
+# ============================================================
 
 print_result() {
     get_server_ip
 
-    SS_URI="ss://$(echo -n "2022-blake3-aes-256-gcm:${SS_PASS}@${SERVER_IP}:${SS_PORT}" | base64_no_wrap)#SS2022-${SERVER_IP}"
-    SOCKS_URI="socks5://${SOCKS_USER}:${SOCKS_PASS}@${SERVER_IP}:${SOCKS_PORT}#SOCKS5-${SERVER_IP}"
+    SS_NAME="SS2022-${SERVER_IP}"
+    SOCKS_NAME="SOCKS5-${SERVER_IP}"
+
+    SS_URI="$(make_ss_uri "2022-blake3-aes-256-gcm" "$SS_PASS" "$SERVER_IP" "$SS_PORT" "$SS_NAME")"
+    SS_LEGACY_URI="$(make_ss_legacy_uri "2022-blake3-aes-256-gcm" "$SS_PASS" "$SERVER_IP" "$SS_PORT" "$SS_NAME")"
+    SOCKS_URI="$(make_socks_uri "$SOCKS_USER" "$SOCKS_PASS" "$SERVER_IP" "$SOCKS_PORT" "$SOCKS_NAME")"
 
     echo -e "\n${green}=========================================${none}"
     echo -e "${green}🎉 部署完成！节点信息如下：${none}"
@@ -621,7 +841,8 @@ print_result() {
     echo -e "端口: ${green}${SS_PORT}${none}"
     echo -e "加密方式: ${green}2022-blake3-aes-256-gcm${none}"
     echo -e "密码: ${green}${SS_PASS}${none}"
-    echo -e "链接: ${green}${SS_URI}${none}"
+    echo -e "推荐链接: ${green}${SS_URI}${none}"
+    echo -e "兼容链接: ${green}${SS_LEGACY_URI}${none}"
     echo ""
 
     echo -e "${yellow}[SOCKS5 节点信息]${none}"
@@ -631,6 +852,16 @@ print_result() {
     echo -e "用户名: ${green}${SOCKS_USER}${none}"
     echo -e "密码: ${green}${SOCKS_PASS}${none}"
     echo -e "链接: ${green}${SOCKS_URI}${none}"
+    echo ""
+
+    echo -e "${yellow}[配置替换说明]${none}"
+    if [[ "$OLD_CONFIG_FOUND" == "true" ]]; then
+        echo -e "检测到旧配置: ${green}是${none}"
+        echo -e "旧配置备份: ${green}${BACKUP_FILE:-已备份}${none}"
+        echo -e "替换范围: ${green}仅替换 shadowsocks / socks 节点入站，其它配置尽量保留${none}"
+    else
+        echo -e "检测到旧配置: ${green}否，新建标准配置${none}"
+    fi
     echo ""
 
     echo -e "${yellow}[常用命令]${none}"
@@ -646,8 +877,8 @@ print_result() {
     echo -e "   SS2022: ${green}TCP/UDP ${SS_PORT}${none}"
     echo -e "   SOCKS5: ${green}TCP ${SOCKS_PORT}${none}"
     echo -e "2. SOCKS5 是明文代理，即使有用户名密码，也不建议在不可信网络长期使用。"
-    echo -e "3. 推荐优先使用 SS2022，SOCKS5 作为兼容或临时用途。"
-    echo -e "4. 如果系统不支持 BBR，脚本不会中断，只是相关优化不会生效。"
+    echo -e "3. x-ui 或部分旧客户端如果无法解析推荐链接，请尝试兼容链接，或手动填写节点信息。"
+    echo -e "4. 推荐 SS2022 使用推荐链接；兼容链接主要给旧解析器兜底。"
 
     echo -e "\n${green}=========================================${none}"
 }
@@ -661,7 +892,7 @@ main() {
     check_system
     check_arch
 
-    info "=== 开始部署 Sing-box SS2022 + SOCKS5 入站节点 ==="
+    info "=== 开始部署 / 替换 Sing-box SS2022 + SOCKS5 节点 ==="
 
     install_dependencies
     setup_swap
@@ -671,7 +902,7 @@ main() {
     get_sing_box_version
     install_sing_box
 
-    generate_config
+    generate_or_replace_node_config
     setup_systemd
     setup_firewall
 
