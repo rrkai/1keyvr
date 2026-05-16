@@ -811,7 +811,7 @@ print_result() {
     SS_LEGACY_URI="$(make_ss_legacy_uri "2022-blake3-aes-256-gcm" "$SS_PASS" "$SERVER_IP" "$SS_PORT" "$SS_NAME")"
     SOCKS_URI="$(make_socks_uri "$SOCKS_USER" "$SOCKS_PASS" "$SERVER_IP" "$SOCKS_PORT" "$SOCKS_NAME")"
 
-    echo -e "\n${green}=========================================${none}"
+    echo -e "\n${green}=================方糖网络====================${none}"
     echo -e "${green}🎉 部署完成！节点信息如下：${none}"
     echo -e "${green}=========================================${none}\n"
 
@@ -819,8 +819,8 @@ print_result() {
     echo -e "系统: ${green}${PRETTY_NAME:-unknown}${none}"
     echo -e "服务器 IP: ${green}${SERVER_IP}${none}"
     echo -e "Sing-box 版本: ${green}v${TARGET_VERSION}${none}"
-    echo -e "版本来源: ${green}${VERSION_SOURCE}${none}"
     echo -e "Go 内存限制: ${green}${GO_MEM_LIMIT}${none}"
+    echo -e "参数优化: ${green}BBR+FQ+DNS+临时内存优化完成${none}"
     echo ""
 
     echo -e "${yellow}[SS2022 节点信息]${none}"
