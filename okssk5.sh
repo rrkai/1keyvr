@@ -811,7 +811,7 @@ print_result() {
     SS_LEGACY_URI="$(make_ss_legacy_uri "2022-blake3-aes-256-gcm" "$SS_PASS" "$SERVER_IP" "$SS_PORT" "$SS_NAME")"
     SOCKS_URI="$(make_socks_uri "$SOCKS_USER" "$SOCKS_PASS" "$SERVER_IP" "$SOCKS_PORT" "$SOCKS_NAME")"
 
-    echo -e "\n${green}=================方糖网络====================${none}"
+    echo -e "\n${green}================方糖网络=================${none}"
     echo -e "${green}🎉 部署完成！节点信息如下：${none}"
     echo -e "${green}=========================================${none}\n"
 
@@ -841,7 +841,7 @@ print_result() {
     echo -e "密码: ${green}${SOCKS_PASS}${none}"
     echo -e "链接: ${green}${SOCKS_URI}${none}"
 
-    echo -e "\n${green}=================方糖网络====================${none}"
+    echo -e "\n${green}================方糖网络=================${none}"
 }
 
 # ============================================================
