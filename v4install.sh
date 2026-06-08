@@ -320,7 +320,7 @@ fi
 
 # 端口
 if [[ -z $port ]]; then
-  default_port=443
+  default_port=18668
   while :; do
     read -p "$(echo -e "请输入端口 [${magenta}1-65535${none}] Input port (默认Default ${cyan}${default_port}$none):")" port
     [ -z "$port" ] && port=$default_port
