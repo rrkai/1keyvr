@@ -82,7 +82,7 @@ if [ $# -ge 1 ]; then
     # 第2个参数是port
     port=${2}
     if [[ -z $port ]]; then
-      port=443
+      port=11443
     fi
 
     # 第3个参数是域名
@@ -320,7 +320,7 @@ fi
 
 # 端口
 if [[ -z $port ]]; then
-  default_port=18668
+  default_port=11443
   while :; do
     read -p "$(echo -e "请输入端口 [${magenta}1-65535${none}] Input port (默认Default ${cyan}${default_port}$none):")" port
     [ -z "$port" ] && port=$default_port
@@ -479,7 +479,7 @@ cat > /usr/local/etc/xray/config.json <<-EOF
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "dest": "${domain}:443",    // ***
+          "dest": "${domain}:11443",    // ***
           "xver": 0,
           "serverNames": ["${domain}"],    // ***
           "privateKey": "${private_key}",    // ***私钥
