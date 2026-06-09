@@ -1,11 +1,5 @@
 #!/bin/bash
 
-# ==========================================
-# 自动化极速部署 Xray VLESS-Reality (纯 IPv4)
-# 完美兼容: Debian 10+ / Ubuntu 20.04+
-# 定制项: 固定端口 11443, 固定 Xray 版本 26.3.27
-# ==========================================
-
 sleep 1
 
 red='\e[91m'
@@ -256,6 +250,5 @@ echo "------------------------------------------------"
 echo -e "${green}您的 VLESS 节点链接如下：${none}"
 echo -e "${cyan}${vless_reality_url}${none}"
 echo "------------------------------------------------"
-echo -e "$green[✓] 定制端口 ${port} 与 Xray 版本 26.3.27 已应用。$none"
 echo -e "$green[✓] OS 兼容、SWAP、DNS、BBR 调优均已完成。$none"
 echo -e "$green[✓] 终端输入 '1keyvr' 可随时找回该链接。$none"
