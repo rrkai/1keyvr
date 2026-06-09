@@ -37,7 +37,7 @@ fi
 
 # 2. 自动生成节点核心参数
 port=$((RANDOM % 55535 + 10000)) # 随机生成 10000-65535 端口
-domain="www.microsoft.com"       # 默认伪装域名
+domain="www.overstock.com"       # 默认伪装域名
 uuid=$(cat /proc/sys/kernel/random/uuid)
 
 echo -e "$yellow本机 IPv4: ${cyan}${ip}${none}"
