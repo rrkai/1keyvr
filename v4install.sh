@@ -131,7 +131,7 @@ if [[ -n $uuid ]]; then
   public_key=$(echo "$tmp_key" | grep -iE 'Public|Password' | awk '{print $NF}')
 
   # ShortID
-  shortid=$(echo -n ${uuid} | sha1sum | head -c 16)
+  shortid=$(printf "%x" $(date +%m))$(openssl rand -hex 4 | cut -c 1-7)
   
   echo
   echo "私钥公钥要在安装xray之后才可以生成"
@@ -348,7 +348,7 @@ fi
 
 # ShortID
 if [[ -z $shortid ]]; then
-  default_shortid=$(echo -n ${uuid} | sha1sum | head -c 16)
+  default_shortid=$(printf "%x" $(date +%m))$(openssl rand -hex 4 | cut -c 1-7)
   while :; do
     echo -e "请输入 "$yellow"ShortID"$none" :"
     read -p "$(echo -e "(默认ShortID: ${cyan}${default_shortid}$none):")" shortid
