@@ -483,7 +483,7 @@ echo "----------------------------------------------------------------"
 service xray restart
 
 # 指纹FingerPrint
-fingerprint="edge"
+fingerprint="safari"
 
 # SpiderX
 spiderx=""
