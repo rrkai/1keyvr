@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# ==========================================
+# 自动化极速部署 Xray VLESS-Reality (纯 IPv4)
+# 完美兼容: Debian 10+ / Ubuntu 20.04+
+# 定制项: 固定端口 11443, 自动安装最新版 Xray
+# ==========================================
+
 sleep 1
 
 red='\e[91m'
@@ -58,10 +64,16 @@ echo -e "$yellow节点端口: ${cyan}${port}${none}"
 echo -e "$yellow节点域名: ${cyan}${domain}${none}"
 echo "----------------------------------------------------------------"
 
-# 3. 安装 Xray 指定版本 (26.3.27)
-echo -e "${yellow}正在安装 Xray 版本 26.3.27...$none"
+# 3. 安装 Xray 最新版本 (并加入失败拦截机制)
+echo -e "${yellow}正在安装 Xray 最新版...$none"
 bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install >/dev/null 2>&1
 bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install-geodata >/dev/null 2>&1
+
+# 校验安装是否真正成功
+if ! command -v xray &> /dev/null; then
+    echo -e "${red}致命错误: Xray 核心安装失败！请检查你的服务器网络是否能正常访问 GitHub。${none}"
+    exit 1
+fi
 
 # 4. 生成密钥对与优雅 ShortID (1位月份+7位随机)
 reality_key_seed=$(echo -n ${uuid} | md5sum | head -c 32 | base64 -w 0 | tr '+/' '-_' | tr -d '=')
@@ -127,6 +139,9 @@ curl -sSL https://github.com/rrkai/1keyvr/raw/main/tcp.sh | bash >/dev/null 2>&1
 
 # 8. 写入 Xray 配置文件
 echo -e "$yellow正在生成 /usr/local/etc/xray/config.json...$none"
+# 防呆机制：确保配置目录一定存在
+mkdir -p /usr/local/etc/xray/
+
 cat > /usr/local/etc/xray/config.json <<-EOF
 {
   "log": {
