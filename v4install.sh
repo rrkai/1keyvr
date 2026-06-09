@@ -60,7 +60,7 @@ echo "----------------------------------------------------------------"
 
 # 3. 安装 Xray 指定版本 (26.3.27)
 echo -e "${yellow}正在安装 Xray 版本 26.3.27...$none"
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install "26.3.27" >/dev/null 2>&1
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install "v26.3.27" >/dev/null 2>&1
 bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install-geodata >/dev/null 2>&1
 
 # 4. 生成密钥对与优雅 ShortID (1位月份+7位随机)
