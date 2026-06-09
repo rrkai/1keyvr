@@ -2,6 +2,8 @@
 
 # ==========================================
 # 自动化极速部署 Xray VLESS-Reality (纯 IPv4)
+# 完美兼容: Debian 10+ / Ubuntu 20.04+
+# 定制项: 固定端口 11443, 固定 Xray 版本 26.3.27
 # ==========================================
 
 sleep 1
@@ -15,9 +17,26 @@ none='\e[0m'
 echo -e "$yellow开始全自动部署 Xray VLESS-Reality...$none"
 echo "----------------------------------------------------------------"
 
-# 准备工作
+# --- 兼容性：检查是否为 root 用户 ---
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${red}错误: 此脚本涉及系统底层修改，必须以 root 身份运行！${none}"
+    echo -e "${yellow}请先执行 ${cyan}sudo -i${yellow} 切换到 root 用户后，再运行本脚本。${none}"
+    exit 1
+fi
+
+# --- 兼容性：检查系统发行版 ---
+source /etc/os-release
+if [[ "${ID}" != "debian" && "${ID}" != "ubuntu" ]]; then
+    echo -e "${red}错误: 本脚本仅支持 Debian 和 Ubuntu 系统！检测到当前系统为: ${ID}${none}"
+    exit 1
+fi
+
+echo -e "${green}系统兼容性检查通过: ${PRETTY_NAME}${none}"
+echo "----------------------------------------------------------------"
+
+# 准备工作 (统一使用 apt-get 保证无交互静默运行)
 apt-get update -qq
-apt-get install -y curl wget sudo jq qrencode net-tools lsof >/dev/null 2>&1
+apt-get install -y curl wget sudo jq qrencode net-tools lsof openssl >/dev/null 2>&1
 
 # 1. 强制获取本机的公网 IPv4
 echo -e "${green}正在获取本机公网 IPv4 地址...${none}"
@@ -35,8 +54,8 @@ if [[ -z "$ip" ]]; then
     exit 1
 fi
 
-# 2. 自动生成节点核心参数
-port=$((RANDOM % 55535 + 10000)) # 随机生成 10000-65535 端口
+# 2. 生成节点核心参数 (端口固定为 11443)
+port=11443                       # 已固定端口为 11443
 domain="www.overstock.com"       # 默认伪装域名
 uuid=$(cat /proc/sys/kernel/random/uuid)
 
@@ -45,12 +64,12 @@ echo -e "$yellow节点端口: ${cyan}${port}${none}"
 echo -e "$yellow节点域名: ${cyan}${domain}${none}"
 echo "----------------------------------------------------------------"
 
-# 3. 安装 Xray 最新官方版本
-echo -e "${yellow}正在安装 Xray 官方最新版...$none"
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install >/dev/null 2>&1
+# 3. 安装 Xray 指定版本 (26.3.27)
+echo -e "${yellow}正在安装 Xray 版本 26.3.27...$none"
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install "26.3.27" >/dev/null 2>&1
 bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install-geodata >/dev/null 2>&1
 
-# 4. 生成密钥对与 ShortID (月份+7位随机)
+# 4. 生成密钥对与优雅 ShortID (1位月份+7位随机)
 reality_key_seed=$(echo -n ${uuid} | md5sum | head -c 32 | base64 -w 0 | tr '+/' '-_' | tr -d '=')
 tmp_key=$(echo -n "${reality_key_seed}" | xargs xray x25519 -i)
 private_key=$(echo "$tmp_key" | grep -iE 'Private' | awk '{print $NF}')
@@ -81,7 +100,7 @@ sed -i '/^vm.swappiness/d' /etc/sysctl.conf
 echo "vm.swappiness = 10" >> /etc/sysctl.conf
 sysctl -p >/dev/null 2>&1
 
-# 6. 优化系统 DNS
+# 6. 优化系统 DNS (完美兼容 Ubuntu systemd-resolved)
 echo -e "$yellow正在优化系统 DNS...$none"
 [ ! -f /etc/resolv.conf.bak ] && cp /etc/resolv.conf /etc/resolv.conf.bak
 cat > /etc/resolv.conf << EOF
@@ -201,31 +220,27 @@ cat > /usr/local/etc/xray/config.json <<-EOF
 EOF
 
 # 9. 重启 Xray 使得配置生效
-service xray restart
+systemctl daemon-reload
+systemctl restart xray
+systemctl enable xray >/dev/null 2>&1
 
 # 10. 生成节点链接并设置快捷键
 fingerprint="safari"
 spiderx=""
 
 vless_reality_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&spx=${spiderx}&#VLESS_R_${ip}"
-echo $vless_reality_url > ~/_vless_reality_url_
+echo "$vless_reality_url" > /root/_vless_reality_url_
 
-if [[ -n "$ZSH_VERSION" ]]; then
-    CONFIG_FILE="$HOME/.zshrc"
-elif [[ -n "$BASH_VERSION" ]]; then
-    CONFIG_FILE="$HOME/.bashrc"
+# 将快捷键写入 root 用户的配置
+if [[ -f "/root/.zshrc" ]]; then
+    CONFIG_FILE="/root/.zshrc"
 else
-    if [[ -f "$HOME/.bashrc" ]]; then
-        CONFIG_FILE="$HOME/.bashrc"
-    elif [[ -f "$HOME/.zshrc" ]]; then
-        CONFIG_FILE="$HOME/.zshrc"
-    else
-        CONFIG_FILE="$HOME/.bashrc"
-    fi
+    CONFIG_FILE="/root/.bashrc"
+    [ ! -f "$CONFIG_FILE" ] && touch "$CONFIG_FILE"
 fi
 
 if ! grep -q "^alias 1keyvr=" "$CONFIG_FILE" 2>/dev/null; then
-    echo "alias 1keyvr='cat ~/_vless_reality_url_'" >> "$CONFIG_FILE"
+    echo "alias 1keyvr='cat /root/_vless_reality_url_'" >> "$CONFIG_FILE"
 fi
 source "$CONFIG_FILE" > /dev/null 2>&1 || true
 
@@ -241,5 +256,6 @@ echo "------------------------------------------------"
 echo -e "${green}您的 VLESS 节点链接如下：${none}"
 echo -e "${cyan}${vless_reality_url}${none}"
 echo "------------------------------------------------"
-echo -e "$green[✓] SWAP、DNS、BBR 调优均已完成。$none"
+echo -e "$green[✓] 定制端口 ${port} 与 Xray 版本 26.3.27 已应用。$none"
+echo -e "$green[✓] OS 兼容、SWAP、DNS、BBR 调优均已完成。$none"
 echo -e "$green[✓] 终端输入 '1keyvr' 可随时找回该链接。$none"
